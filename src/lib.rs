@@ -113,10 +113,18 @@ impl<'a, F, G> RunningReRouter<'a, F, G>
         if to.exists() {
             Err(io::ErrorKind::AlreadyExists.into())
         } else {
-            sleep(Duration::from_millis(1000));
             println!("{:?} => {:?}", from, to);
-            fs::rename(from, to)?;
-            Ok(())
+            if let Err(e) = fs::rename(&from, &to) {
+                if e.kind() == io::ErrorKind::NotFound {
+                    // need to sleep b/c sometimes the file isn't actually there yet
+                    sleep(Duration::from_millis(1000));
+                    fs::rename(&from, &to)
+                } else {
+                    Err(e)
+                }
+            } else {
+                Ok(())
+            }
         }
     }
 }
