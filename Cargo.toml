@@ -1,0 +1,18 @@
+[package]
+name = "reroute"
+version = "0.1.0"
+authors = ["Khyber Sen <kkysen@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+inotify = "0.7.0"
+clap = "2.33.0"
+structopt = {version = "0.3.2", features = ["paw"]}
+paw = "1.0.0"
+
+[profile.release]
+lto = true
+panic = "abort"
+opt-level = "z"
