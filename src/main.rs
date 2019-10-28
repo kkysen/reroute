@@ -29,12 +29,12 @@ fn main(args: Args) -> io::Result<()> {
     println!("rerouting {:?} => {:?}", router.from, router.to);
     router.run(
         |event| {
-            event
+            let ext = event
                 .name
                 .and_then(|it| it.extension())
                 .and_then(|it| it.to_str())
-                .unwrap_or("")
-                != "tmp"
+                .unwrap_or("");
+            !(ext == "tmp" || ext == "crdownload")
         },
         |e| eprintln!("{:?}", e),
     )

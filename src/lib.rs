@@ -43,7 +43,9 @@ struct RunningReRouter<'a, F, G>
     filter: F,
     on_error: G,
     inotify: Inotify,
-    cookie: u32,
+//    cookie: u32, // cookie doesn't work on WSL, use prev instead
+    prev: Option<PathBuf>,
+    moving: bool,
 }
 
 impl<'a, F, G> RunningReRouter<'a, F, G>
@@ -56,15 +58,22 @@ impl<'a, F, G> RunningReRouter<'a, F, G>
             filter,
             on_error,
             inotify: Inotify::init()?,
-            cookie: 0,
+//            cookie: 0,
+            prev: None,
+            moving: false,
         })
+    }
+    
+    fn prev(&self) -> Option<&Path> {
+        self.prev.as_ref().map(|it| it.as_path())
     }
     
     fn run(&mut self) -> io::Result<()> {
         if !self.from.is_dir() || !self.to.is_dir() {
             return Err(io::ErrorKind::InvalidInput.into())
         }
-        self.inotify.add_watch(self.from, WatchMask::CREATE)?;
+        let mask = WatchMask::CREATE | WatchMask::MOVE | WatchMask::ONLYDIR;
+        self.inotify.add_watch(self.from, mask)?;
         let mut buffer = [0u8; 4096];
         loop {
             let events = self.inotify.read_events_blocking(buffer.as_mut())?;
@@ -77,36 +86,50 @@ impl<'a, F, G> RunningReRouter<'a, F, G>
     }
     
     fn handle_event(&mut self, event: Event<&OsStr>) -> io::Result<()> {
+        dbg!(&event);
         let mask = event.mask;
         if mask.contains(EventMask::ISDIR) {
             return Ok(());
         }
-        if mask.contains(EventMask::CREATE) {
-            if !mask.contains(EventMask::ISDIR) {
-                self.re_route_event(event)?;
-            }
-        } else if mask.contains(EventMask::MOVED_FROM) {
-            self.cookie = event.cookie;
-        } else if mask.contains(EventMask::MOVED_TO) {
-            if self.cookie != event.cookie {
-                self.re_route_event(event)?;
-            }
-            self.cookie = 0;
-        }
-        Ok(())
-    }
-    
-    fn re_route_event(&self, event: Event<&OsStr>) -> io::Result<()> {
         let event = Event {
             wd: event.wd,
             mask: event.mask,
             cookie: event.cookie,
             name: event.name.map(|it| Path::new(it)),
         };
-        if !(self.filter)(&event) {
+        if mask.contains(EventMask::CREATE) {
+            if !mask.contains(EventMask::ISDIR) {
+                self.re_route_event(&event)?;
+            }
+        } else if mask.contains(EventMask::MOVED_FROM) {
+//            self.cookie = event.cookie;
+            self.prev = event.name.map(|it| it.into());
+            self.moving = true;
+        } else if mask.contains(EventMask::MOVED_TO) {
+            dbg!(&self.cookie);
+            dbg!(&self.prev);
+            dbg!(&event);
+            let same_as_prev = self.prev() == event.name;
+            if (moving && !same_as_prev) || same_as_prev {
+            
+            }
+            if /*self.cookie != event.cookie ||*/ self.prev() == event.name {
+                self.re_route_event(&event)?;
+            }
+//            self.cookie = 0;
+            self.moving = false;
+        }
+        Ok(())
+    }
+    
+    fn re_route_event(&mut self, event: &Event<&Path>) -> io::Result<()> {
+        let from = event.name.unwrap();
+        if !(self.filter)(event) {
+            self.prev = Some(from.into());
+            self.moving = false;
             return Ok(())
         }
-        let from = event.name.unwrap();
+        self.prev = None;
         let to = from;
         let from = self.from.join(from);
         let to = self.to.join(to);
